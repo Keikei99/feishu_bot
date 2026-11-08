@@ -462,7 +462,7 @@ class LLMTests(unittest.TestCase):
 
 
 class ServiceTests(unittest.TestCase):
-    """验证群@、严格指令、双阶段回复、恢复及独立回执的完整行为。"""
+    """验证群@、请求路由、双阶段回复、恢复及独立回执的完整行为。"""
 
     def setUp(self):
         """使用临时队列与虚构接口，不加载任何本地凭据。"""
@@ -499,6 +499,28 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(receipt.kwargs, {"phase": "receipt"})
         self.assertEqual(result.kwargs, {"phase": "result"})
         self.assertIn("周五发布", result.args[1])
+
+    def test_summary_reply_uses_time_label_and_bracket_headings(self):
+        """完整回复使用时间标签和四个方括号栏目，保留编号与项目符号正文。"""
+        body = (
+            "**讨论主题**\n发布进展。\n\n"
+            "**关键结论**\n1. 周五发布。\n\n"
+            "**待办事项**\n* 张三负责验收。\n\n"
+            "**待确认问题**\n* 上线时间待确认。"
+        )
+        self.llm.summarize.return_value = SummaryResult(body)
+        self.bot.submit(event())
+        self.process()
+        reply = self.feishu.reply.call_args.args[1]
+        self.assertEqual(reply.splitlines()[0], "所选聊天记录总结｜1 条消息")
+        self.assertTrue(reply.splitlines()[1].startswith("【时间】"))
+        self.assertIn("（Asia/Shanghai）", reply.splitlines()[1])
+        for heading in ("讨论主题", "关键结论", "待办事项", "待确认问题"):
+            self.assertIn(f"【{heading}】\n", reply)
+            self.assertNotIn(f"**{heading}**", reply)
+        self.assertIn("1. 周五发布。", reply)
+        self.assertIn("* 张三负责验收。", reply)
+        self.assertIn("* 上线时间待确认。", reply)
 
     def test_bots_private_messages_and_system_events_are_ignored(self):
         """机器人、私聊及系统事件不会入队，也不发送回执。"""
@@ -538,8 +560,8 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(self.bot.submit(event(chat_id="oc_allowed")))
 
     def test_unknown_keywords_show_menu_without_model_or_message_fetch(self):
-        """自然语言、带附加词、空指令都回菜单，不作语义猜测。"""
-        for index, keyword in enumerate(("帮我总结一下", "总结重点", "总结。", "总结\n额外要求", "帮助", "")):
+        """否定、功能询问、无关文字或空指令都回菜单。"""
+        for index, keyword in enumerate(("不要总结", "取消总结", "总结功能怎么用", "总结\n额外要求", "帮助", "")):
             with self.subTest(keyword=keyword):
                 self.bot.submit(event(f"om_menu_{index}", text=keyword))
                 self.process(summary=False)

@@ -1,4 +1,4 @@
-"""提取飞书消息正文、精确指令和引用对象，保存可总结的消息记录。"""
+"""提取飞书消息正文、请求表达和引用对象，保存可总结的消息记录。"""
 
 from dataclasses import dataclass
 from html import unescape
@@ -22,7 +22,7 @@ def extract_command(message: dict[str, Any], bot_open_id: str) -> str:
 
     text 从原始 JSON 文本读取；post 支持文字、当前机器人的 at 节点和
     多语言正文。其他人的 @、标题、附件和不支持的富文本节点仍会留下内容，
-    从而不会把带额外内容的消息误当成严格的「总结」指令。消息格式非法或
+    交给路由完整匹配，避免删除附加信息后误触发总结。消息格式非法或
     非文字类型时返回空字符串，由路由层展示功能菜单。
     """
     if not bot_open_id:
@@ -164,7 +164,7 @@ class ChatMessage:
         text：content_text 提取的正文或明确的非文本占位提示。
         parent_id：用户引用回复的上一层消息 ID，用于定位合并转发记录。
         sender_name：由群成员信息或账号信息取得的展示姓名；未知时留空。
-        command：移除当前机器人 @ 标记后的严格指令，不是待总结材料。
+        command：移除当前机器人 @ 标记后的请求表达，不是待总结材料。
 
     对象不可变；原始 SDK 对象和附件资源密钥不作为独立字段保存。
     """
@@ -184,7 +184,7 @@ class ChatMessage:
 
         参数：
             event：包含 message 与 sender 的事件正文，不包含外层 header/schema。
-            bot_open_id：当前机器人 open_id；提供时提取严格指令。
+            bot_open_id：当前机器人 open_id；提供时提取请求表达。
 
         返回：
             cls 实例。发送者 ID 优先取 open_id，其次取 user_id，均缺失则用 unknown。

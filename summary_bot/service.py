@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from .config import Config
 from .feishu import FeishuError, FeishuGateway, InvalidSelectionError
+from .formatting import format_summary_body
 from .llm import AnthropicMessagesClient, LLMError
 from .messages import ChatMessage
 from .prompt import InputTooLarge, SummaryInput, build_input
@@ -139,17 +140,17 @@ class SummaryBot:
         end = datetime.fromtimestamp(summary_input.last_time_ms / 1000, timezone).strftime("%m-%d %H:%M:%S")
         header = (
             f"所选聊天记录总结｜{summary_input.message_count} 条消息\n"
-            f"{start} ～ {end}（{self.config.display_timezone}）"
+            f"【时间】{start} ～ {end}（{self.config.display_timezone}）"
         )
         notes = []
         if has_unknown_names:
             notes.append("部分发言者名称暂时无法获取，已标注为“姓名未知”。")
         if result.truncated:
             notes.append("模型达到输出长度上限，总结可能未完整生成。")
-        return f"{header}\n\n{result.text}" + ("\n\n" + "\n".join(notes) if notes else "")
+        return f"{header}\n\n{format_summary_body(result.text)}" + ("\n\n" + "\n".join(notes) if notes else "")
 
     def _route_reply(self, trigger: ChatMessage) -> str:
-        """精确指令执行已注册功能，未识别输入返回文字菜单。"""
+        """通过关键词或常见请求表达执行功能，未识别输入返回文字菜单。"""
         command = resolve_command(trigger.command)
         if command is None:
             return menu_text()

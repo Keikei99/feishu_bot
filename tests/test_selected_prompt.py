@@ -1,4 +1,4 @@
-"""验证引用元数据、严格指令和选中消息完整输入，不读取配置文件或访问网络。"""
+"""验证引用元数据、请求原文提取和选中消息完整输入，不读取配置或访问网络。"""
 
 from dataclasses import replace
 import json
@@ -55,12 +55,12 @@ class ExactCommandTests(unittest.TestCase):
         self.assertIn("@总结助手", message.text)
         self.assertEqual(ChatMessage.from_event(message_event()).command, "")
 
-    def test_extra_words_punctuation_and_internal_whitespace_do_not_match(self):
-        """自然语言变体、标点和指令内部空格不会变成严格的总结指令。"""
-        for text in ("@_user_1 帮我总结一下", "@_user_1 总结重点", "@_user_1 总结。",
-                     "@_user_1 总 结", "@_user_1 总\n结", "@_user_1 总结\n额外内容"):
-            with self.subTest(text=text):
-                self.assertNotEqual(extract_command(message_event(text)["message"], BOT_ID), "总结")
+    def test_request_words_punctuation_and_internal_whitespace_are_preserved(self):
+        """提取层保留完整表达，是否触发总结由路由层判断。"""
+        for request in ("帮我总结一下", "总结重点", "总结。", "总 结", "总\n结", "总结\n额外内容"):
+            with self.subTest(request=request):
+                text = "@_user_1 " + request
+                self.assertEqual(extract_command(message_event(text)["message"], BOT_ID), request)
 
     def test_other_mentions_and_prefix_collisions_are_preserved(self):
         """不能把其他人的 @ 或更长的占位符一同删去。"""

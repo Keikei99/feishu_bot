@@ -69,7 +69,7 @@ class ReceiptPolicyTests(unittest.TestCase):
 
     def test_unknown_and_empty_keywords_reply_with_menu_only(self):
         """未识别指令或仅 @ 机器人只收到一条文字菜单。"""
-        for index, keyword in enumerate(("帮助", "", "帮我总结一下", "总结重点")):
+        for index, keyword in enumerate(("帮助", "", "不要总结", "总结功能怎么用")):
             with self.subTest(keyword=keyword):
                 self.feishu.reply.reset_mock()
                 self.assertTrue(self.bot.submit(request(f"om_menu_{index}", keyword)))
