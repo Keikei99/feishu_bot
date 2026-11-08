@@ -1,8 +1,10 @@
 """验证只有通过材料校验的总结请求才发送处理回执，不接触真实服务。"""
 
+from contextlib import closing
 from dataclasses import replace
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 from threading import Event
 import unittest
@@ -148,7 +150,11 @@ class ReceiptPolicyTests(unittest.TestCase):
         self.feishu.reply.reset_mock()
         self.feishu.fetch_forwarded.side_effect = AssertionError("恢复菜单不得查询消息")
         restarted = SummaryBot(self.config, self.feishu, self.llm, JobStore(self.config.state_db_path))
-        self.assertTrue(restarted.process_ack_next())
+        self.assertFalse(restarted.process_ack_next())
+        with closing(sqlite3.connect(self.config.state_db_path)) as db:
+            retry_at = db.execute("SELECT next_retry_at FROM jobs").fetchone()[0]
+        with patch("summary_bot.store.time.time", return_value=retry_at):
+            self.assertTrue(restarted.process_ack_next())
         self.assertFalse(restarted.process_next())
         self.feishu.reply.assert_called_once()
         reply = self.feishu.reply.call_args

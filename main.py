@@ -57,7 +57,12 @@ def main() -> int:
             return 2
         gateway = FeishuGateway(config, gateway.client)
     llm = AnthropicMessagesClient(config)
-    bot = SummaryBot(config, gateway, llm, JobStore(config.state_db_path))
+    store = JobStore(
+        config.state_db_path, max_retries=config.job_max_retries,
+        retry_base_seconds=config.job_retry_base_seconds,
+        retry_max_seconds=config.job_retry_max_seconds,
+    )
+    bot = SummaryBot(config, gateway, llm, store)
 
     def on_message(data) -> None:
         """接收 SDK 解码后的消息事件，将事件正文转换为字典后提交任务。

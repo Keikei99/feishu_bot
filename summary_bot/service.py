@@ -17,6 +17,10 @@ from .store import JobStore
 
 logger = logging.getLogger(__name__)
 RECEIPT_TEXT = "收到，正在处理"
+FAILURE_NOTICE_TEXT = (
+    "本次请求处理或回复失败，自动重试次数已用完。"
+    "\n请稍后重新发送请求；如果仍失败，请联系管理员。"
+)
 
 
 class SummaryBot:
@@ -114,8 +118,7 @@ class SummaryBot:
             self.store.mark_acknowledged(trigger.message_id)
         except Exception as exc:
             self._prepared_inputs.pop(trigger.message_id, None)
-            logger.error("请求校验或回复失败，message_id=%s, error_type=%s", trigger.message_id, type(exc).__name__)
-            self.store.finish(trigger.message_id, failed=True)
+            self._retry_failure(trigger, exc, stage="validation_or_reply")
         else:
             self._wake.set()
         return True
@@ -177,8 +180,49 @@ class SummaryBot:
         self.store.finish(trigger.message_id)
         logger.info("已回复，message_id=%s", trigger.message_id)
 
+    def _retry_failure(self, trigger: ChatMessage, error: Exception, *, stage: str) -> None:
+        """持久化失败调度，记录安全诊断信息；次数耗尽后输出错误日志。"""
+        retry = self.store.finish(trigger.message_id, failed=True)
+        if retry is None:
+            logger.error("失败任务不在执行状态，message_id=%s, stage=%s, error_type=%s",
+                         trigger.message_id, stage, type(error).__name__)
+        elif retry.next_retry_at is None:
+            logger.error("任务重试次数已耗尽，message_id=%s, stage=%s, attempts=%s, error_type=%s",
+                         trigger.message_id, stage, retry.attempts, type(error).__name__)
+            self._receipt_wake.set()
+        else:
+            logger.warning(
+                "任务失败，已安排重试，message_id=%s, stage=%s, attempts=%s, "
+                "next_retry_at=%.3f, error_type=%s",
+                trigger.message_id, stage, retry.attempts, retry.next_retry_at, type(error).__name__,
+            )
+
+    def process_failure_notice_next(self) -> bool:
+        """发送一条已耗尽业务重试的失败通知；通知独立退避，不覆盖原总结。"""
+        job = self.store.next_failure_notice()
+        if job is None:
+            return False
+        message_id = job.message.message_id
+        try:
+            self.feishu.reply(message_id, FAILURE_NOTICE_TEXT, phase="failure_notice")
+        except Exception as exc:
+            retry = self.store.finish_failure_notice(message_id, failed=True)
+            if retry is None or retry.next_retry_at is None:
+                logger.error("失败通知无法送达，已停止重试，message_id=%s, error_type=%s",
+                             message_id, type(exc).__name__)
+            else:
+                logger.warning(
+                    "失败通知发送失败，已安排重试，message_id=%s, attempts=%s, "
+                    "next_retry_at=%.3f, error_type=%s",
+                    message_id, retry.attempts, retry.next_retry_at, type(exc).__name__,
+                )
+        else:
+            self.store.finish_failure_notice(message_id)
+            logger.info("已发送失败通知，message_id=%s", message_id)
+        return True
+
     def process_next(self) -> bool:
-        """领取一条已成功回执的任务，保存结果后发送，支持失败后重启恢复。"""
+        """领取一条到期且已回执的任务，保存结果后发送，失败后按退避恢复。"""
         job = self.store.next_job()
         if job is None:
             return False
@@ -193,16 +237,17 @@ class SummaryBot:
             self._send_final(trigger, reply_text)
         except Exception as exc:
             self._prepared_inputs.pop(trigger.message_id, None)
-            logger.error("任务处理失败，message_id=%s, error_type=%s", trigger.message_id, type(exc).__name__)
-            self.store.finish(trigger.message_id, failed=True)
+            self._retry_failure(trigger, exc, stage="processing_or_reply")
         return True
 
     def _run_receipts(self) -> None:
-        """持续校验请求，仅为有效总结发送回执并唤醒模型线程。"""
+        """交替处理失败通知与请求校验，避免通知积压阻止新请求领取。"""
         while not self._stop.is_set():
             self._receipt_wake.clear()
             try:
-                if self.process_ack_next():
+                notified = self.process_failure_notice_next()
+                processed = self.process_ack_next()
+                if notified or processed:
                     continue
             except Exception as exc:
                 logger.error("回执队列读取失败，error_type=%s", type(exc).__name__)

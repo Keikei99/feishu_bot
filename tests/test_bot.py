@@ -482,6 +482,12 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(self.bot.process_ack_next())
         self.assertEqual(self.bot.process_next(), summary)
 
+    def retry_due(self):
+        """把队列时钟推进到重试时刻，不实际等待退避间隔。"""
+        with closing(sqlite3.connect(self.config.state_db_path)) as db:
+            retry_at = db.execute("SELECT next_retry_at FROM jobs WHERE message_id='om_new'").fetchone()[0]
+        return patch("summary_bot.store.time.time", return_value=retry_at)
+
     def test_dedup_and_only_selected_content(self):
         """重复事件只发一对回复；只把明确选中的消息送入模型。"""
         self.assertTrue(self.bot.submit(event()))
@@ -613,8 +619,10 @@ class ServiceTests(unittest.TestCase):
         self.llm.summarize.assert_not_called()
         self.feishu.reply.side_effect = None
         restarted = SummaryBot(self.config, self.feishu, self.llm, JobStore(self.config.state_db_path))
-        self.assertTrue(restarted.process_ack_next())
-        self.assertTrue(restarted.process_next())
+        self.assertFalse(restarted.process_ack_next())
+        with self.retry_due():
+            self.assertTrue(restarted.process_ack_next())
+            self.assertTrue(restarted.process_next())
         self.assertEqual(self.llm.summarize.call_count, 1)
 
     def test_read_failure_does_not_summarize_partial_data(self):
@@ -655,7 +663,9 @@ class ServiceTests(unittest.TestCase):
         resumed = JobStore(self.config.state_db_path)
         bot = SummaryBot(self.config, self.feishu, self.llm, resumed)
         self.assertFalse(bot.process_ack_next())
-        self.assertTrue(bot.process_next())
+        self.assertFalse(bot.process_next())
+        with self.retry_due():
+            self.assertTrue(bot.process_next())
         self.llm.summarize.assert_not_called()
         self.feishu.reply.assert_called_with("om_new", "已经生成的总结", phase="result")
         self.assertEqual(self.feishu.reply.call_count, 2)
@@ -670,7 +680,9 @@ class ServiceTests(unittest.TestCase):
         self.llm.reset_mock()
         restarted = SummaryBot(self.config, self.feishu, self.llm, JobStore(self.config.state_db_path))
         self.assertFalse(restarted.process_ack_next())
-        self.assertTrue(restarted.process_next())
+        self.assertFalse(restarted.process_next())
+        with self.retry_due():
+            self.assertTrue(restarted.process_next())
         self.llm.summarize.assert_not_called()
         self.assertIn("周五发布", self.feishu.reply.call_args.args[1])
 

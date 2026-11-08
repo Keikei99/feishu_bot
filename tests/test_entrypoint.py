@@ -53,6 +53,11 @@ class EntrypointTests(unittest.TestCase):
         dependencies["gateway_instance"].get_bot_open_id.assert_called_once()
         runtime_config = dependencies["SummaryBot"].call_args.args[0]
         self.assertEqual(runtime_config.bot_open_id, "ou_resolved_bot")
+        dependencies["JobStore"].assert_called_once_with(
+            runtime_config.state_db_path, max_retries=runtime_config.job_max_retries,
+            retry_base_seconds=runtime_config.job_retry_base_seconds,
+            retry_max_seconds=runtime_config.job_retry_max_seconds,
+        )
         dependencies["SummaryBot"].return_value.start.assert_called_once()
         dependencies["SummaryBot"].return_value.close.assert_called_once()
         dependencies["AnthropicMessagesClient"].return_value.close.assert_called_once()

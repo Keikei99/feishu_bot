@@ -56,6 +56,8 @@ class Config:
         max_input_chars / max_message_chars：聊天 JSON 和单条正文的字符预算。
         display_timezone：聊天时间和回复标题使用的 IANA 时区名称。
         state_db_path：SQLite 数据库路径，由 from_env 解析为项目相对路径或绝对路径。
+        job_max_retries：队列每阶段首次执行失败后允许的额外重试次数。
+        job_retry_base_seconds / job_retry_max_seconds：队列指数退避的初始间隔和上限。
         log_level：业务日志级别。
 
     使用说明：
@@ -82,6 +84,9 @@ class Config:
     display_timezone: str = "Asia/Shanghai"
     state_db_path: Path = PROJECT_DIR / "data/bot.sqlite3"
     log_level: str = "INFO"
+    job_max_retries: int = 5
+    job_retry_base_seconds: float = 5
+    job_retry_max_seconds: float = 300
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -151,6 +156,10 @@ class Config:
         db_path = Path(os.getenv("STATE_DB_PATH", "data/bot.sqlite3")).expanduser()
         base_url = required("LLM_BASE_URL")
         messages_endpoint(base_url)
+        job_retry_base = number("JOB_RETRY_BASE_SECONDS", "5", float, 0.1)
+        job_retry_max = number("JOB_RETRY_MAX_SECONDS", "300", float, 0.1)
+        if job_retry_max < job_retry_base:
+            raise ValueError("JOB_RETRY_MAX_SECONDS 必须不小于 JOB_RETRY_BASE_SECONDS")
         return cls(
             app_id=required("FEISHU_APP_ID"),
             app_secret=required("FEISHU_APP_SECRET"),
@@ -174,4 +183,7 @@ class Config:
             display_timezone=timezone,
             state_db_path=db_path if db_path.is_absolute() else PROJECT_DIR / db_path,
             log_level=log_level,
+            job_max_retries=number("JOB_MAX_RETRIES", "5", minimum=0),
+            job_retry_base_seconds=job_retry_base,
+            job_retry_max_seconds=job_retry_max,
         )
