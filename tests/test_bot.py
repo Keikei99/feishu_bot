@@ -22,7 +22,7 @@ from summary_bot.feishu import FeishuError, FeishuGateway, HistoryResult, Invali
 from summary_bot.llm import AnthropicMessagesClient, LLMError, SummaryResult
 from summary_bot.messages import ChatMessage, content_text
 from summary_bot.prompt import InputTooLarge, build_input
-from summary_bot.service import SummaryBot
+from summary_bot.service import RECEIPT_TEXT, SummaryBot
 from summary_bot.store import JobStore
 
 
@@ -501,7 +501,7 @@ class ServiceTests(unittest.TestCase):
         self.feishu.fetch_history.assert_not_called()
         self.assertEqual(self.feishu.reply.call_count, 2)
         receipt, result = self.feishu.reply.call_args_list
-        self.assertEqual(receipt.args, ("om_new", "收到，正在处理"))
+        self.assertEqual(receipt.args, ("om_new", RECEIPT_TEXT))
         self.assertEqual(receipt.kwargs, {"phase": "receipt"})
         self.assertEqual(result.kwargs, {"phase": "result"})
         self.assertIn("周五发布", result.args[1])
@@ -788,7 +788,7 @@ class ServiceTests(unittest.TestCase):
                 self.assertTrue(bot.process_next())
         self.assertEqual(len(outgoing), 2)
         self.assertEqual(outgoing[0]["msg_type"], "text")
-        self.assertEqual(json.loads(outgoing[0]["content"])["text"], "收到，正在处理")
+        self.assertEqual(json.loads(outgoing[0]["content"])["text"], RECEIPT_TEXT)
         self.assertIn("1 条消息", json.loads(outgoing[1]["content"])["text"])
         self.assertNotEqual(outgoing[0]["uuid"], outgoing[1]["uuid"])
 

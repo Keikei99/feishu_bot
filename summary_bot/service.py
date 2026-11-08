@@ -16,7 +16,7 @@ from .store import JobStore
 
 
 logger = logging.getLogger(__name__)
-RECEIPT_TEXT = "收到，正在处理"
+RECEIPT_TEXT = "收到，正在处理中"
 FAILURE_NOTICE_TEXT = (
     "本次请求处理或回复失败，自动重试次数已用完。"
     "\n请稍后重新发送请求；如果仍失败，请联系管理员。"

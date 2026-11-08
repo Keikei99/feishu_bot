@@ -59,6 +59,9 @@ class Config:
         job_max_retries：队列每阶段首次执行失败后允许的额外重试次数。
         job_retry_base_seconds / job_retry_max_seconds：队列指数退避的初始间隔和上限。
         log_level：业务日志级别。
+        log_file：滚动日志文件路径，相对路径以项目目录为基准。
+        log_max_bytes / log_backup_count：单个日志文件的大小上限和备份数量。
+        log_console：是否同时输出到终端；生产默认仅写滚动文件。
 
     使用说明：
         frozen=True 防止初始化后意外修改字段，repr=False 避免在对象展示中输出
@@ -87,6 +90,10 @@ class Config:
     job_max_retries: int = 5
     job_retry_base_seconds: float = 5
     job_retry_max_seconds: float = 300
+    log_file: Path = PROJECT_DIR / "logs/bot.log"
+    log_max_bytes: int = 20 * 1024 * 1024
+    log_backup_count: int = 4
+    log_console: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -153,6 +160,13 @@ class Config:
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
         if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("LOG_LEVEL 无效")
+        log_file_value = os.getenv("LOG_FILE", "logs/bot.log").strip()
+        if not log_file_value:
+            raise ValueError("LOG_FILE 不能为空")
+        log_file = Path(log_file_value).expanduser()
+        log_console_value = os.getenv("LOG_CONSOLE", "false").strip().lower()
+        if log_console_value not in {"true", "false"}:
+            raise ValueError("LOG_CONSOLE 必须是 true 或 false")
         db_path = Path(os.getenv("STATE_DB_PATH", "data/bot.sqlite3")).expanduser()
         base_url = required("LLM_BASE_URL")
         messages_endpoint(base_url)
@@ -186,4 +200,8 @@ class Config:
             job_max_retries=number("JOB_MAX_RETRIES", "5", minimum=0),
             job_retry_base_seconds=job_retry_base,
             job_retry_max_seconds=job_retry_max,
+            log_file=log_file if log_file.is_absolute() else PROJECT_DIR / log_file,
+            log_max_bytes=number("LOG_MAX_BYTES", "20971520", minimum=1024),
+            log_backup_count=number("LOG_BACKUP_COUNT", "4", minimum=1),
+            log_console=log_console_value == "true",
         )

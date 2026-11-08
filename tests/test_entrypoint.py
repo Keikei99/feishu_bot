@@ -3,6 +3,8 @@
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
+import os
+import signal
 import sys
 import unittest
 from unittest.mock import Mock, patch
@@ -31,6 +33,7 @@ class EntrypointTests(unittest.TestCase):
         stack.enter_context(patch.object(sys, "argv", argv))
         stack.enter_context(patch("main.Config.from_env", return_value=settings))
         dependencies = {}
+        dependencies["setup_logging"] = stack.enter_context(patch("main.setup_logging"))
         for name in ("FeishuGateway", "AnthropicMessagesClient", "JobStore", "SummaryBot"):
             dependencies[name] = stack.enter_context(patch("main." + name))
         dependencies["websocket"] = stack.enter_context(patch("main.lark.ws.Client"))
@@ -43,8 +46,23 @@ class EntrypointTests(unittest.TestCase):
         """检查模式不自动查身份、不连接服务、不创建数据库。"""
         dependencies = self.dependencies(["main.py", "--check-config"], config())
         self.assertEqual(main.main(), 0)
+        for name in ("setup_logging", "FeishuGateway", "AnthropicMessagesClient", "JobStore", "SummaryBot", "websocket"):
+            dependencies[name].assert_not_called()
+
+    def test_logging_check_does_not_create_clients_or_queue(self):
+        settings = config()
+        dependencies = self.dependencies(["main.py", "--check-logging"], settings)
+        self.assertEqual(main.main(), 0)
+        dependencies["setup_logging"].assert_called_once_with(settings)
         for name in ("FeishuGateway", "AnthropicMessagesClient", "JobStore", "SummaryBot", "websocket"):
             dependencies[name].assert_not_called()
+
+    def test_unwritable_log_prevents_starting_service(self):
+        dependencies = self.dependencies(["main.py"], config())
+        dependencies["setup_logging"].side_effect = PermissionError("fake log directory is not writable")
+        self.assertEqual(main.main(), 2)
+        dependencies["SummaryBot"].assert_not_called()
+        dependencies["websocket"].assert_not_called()
 
     def test_startup_resolves_missing_bot_id_before_starting_workers(self):
         """留空ID时先向飞书查本机器人身份，并传入业务过滤配置。"""
@@ -67,6 +85,16 @@ class EntrypointTests(unittest.TestCase):
         dependencies = self.dependencies(["main.py"], replace(config(), bot_open_id="ou_configured"))
         self.assertEqual(main.main(), 0)
         dependencies["gateway_instance"].get_bot_open_id.assert_not_called()
+
+    def test_sigterm_closes_workers_and_model_and_restores_signal_handler(self):
+        dependencies = self.dependencies(["main.py"], replace(config(), bot_open_id="ou_configured"))
+        original_handler = signal.getsignal(signal.SIGTERM)
+        dependencies["websocket"].return_value.start.side_effect = lambda: os.kill(os.getpid(), signal.SIGTERM)
+        dependencies["SummaryBot"].return_value.close.side_effect = lambda: os.kill(os.getpid(), signal.SIGTERM)
+        self.assertEqual(main.main(), 0)
+        dependencies["SummaryBot"].return_value.close.assert_called_once()
+        dependencies["AnthropicMessagesClient"].return_value.close.assert_called_once()
+        self.assertEqual(signal.getsignal(signal.SIGTERM), original_handler)
 
     def test_identity_failure_does_not_start_or_open_database(self):
         """身份查询失败时明确退出，不能降级到全群触发。"""
